@@ -1811,6 +1811,11 @@ export async function runEmbeddedAttempt(
             contextTokenBudget,
             reserveTokens,
           });
+          log.info(
+            `[preemptive-compaction] tokenSource=${preemptiveCompaction.tokenSource} ` +
+              `estimatedPromptTokens=${preemptiveCompaction.estimatedPromptTokens} ` +
+              `shouldCompact=${preemptiveCompaction.shouldCompact}`,
+          );
           if (preemptiveCompaction.route === "truncate_tool_results_only") {
             const truncationResult = truncateOversizedToolResultsInSessionManager({
               sessionManager,

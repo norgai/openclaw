@@ -103,7 +103,24 @@ export function buildCompactionSummarizationInstructions(
 export function estimateMessagesTokens(messages: AgentMessage[]): number {
   // SECURITY: toolResult.details can contain untrusted/verbose payloads; never include in LLM-facing compaction.
   const safe = stripToolResultDetails(messages);
-  return safe.reduce((sum, message) => sum + estimateTokens(message), 0);
+  return safe.reduce((sum, message) => {
+    const base = estimateTokens(message);
+    // Upstream estimateTokens only counts text + image blocks in toolResult messages.
+    // Any other block types (e.g. JSON objects from custom tool outputs) contribute 0.
+    // Add a JSON.stringify fallback so tool-heavy sessions are not under-counted.
+    let supplement = 0;
+    if (
+      message.role === "toolResult" &&
+      Array.isArray((message as { content?: unknown }).content)
+    ) {
+      for (const block of (message as { content: Array<{ type?: string }> }).content) {
+        if (block.type !== "text" && block.type !== "image") {
+          supplement += Math.ceil(JSON.stringify(block).length / 4);
+        }
+      }
+    }
+    return sum + base + supplement;
+  }, 0);
 }
 
 function estimateCompactionMessageTokens(message: AgentMessage): number {
