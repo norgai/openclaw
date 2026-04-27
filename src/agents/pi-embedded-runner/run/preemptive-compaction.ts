@@ -50,6 +50,7 @@ export function shouldPreemptivelyCompactBeforePrompt(params: {
   promptBudgetBeforeReserve: number;
   overflowTokens: number;
   toolResultReducibleChars: number;
+  tokenSource: "charsHeuristic";
 } {
   const estimatedPromptTokens = estimatePrePromptTokens(params);
   const promptBudgetBeforeReserve = Math.max(
@@ -86,5 +87,6 @@ export function shouldPreemptivelyCompactBeforePrompt(params: {
     promptBudgetBeforeReserve,
     overflowTokens,
     toolResultReducibleChars,
+    tokenSource: "charsHeuristic",
   };
 }
