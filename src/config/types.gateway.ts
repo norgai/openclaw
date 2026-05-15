@@ -377,6 +377,16 @@ export type GatewayWebchatConfig = {
   chatHistoryMaxChars?: number;
 };
 
+export type GatewayAdapterConfig = {
+  /**
+   * When true (default), the gateway calls GET /api/agents/{id} before each
+   * job dispatch to verify the agent is not paused (Protocol v2 defence-in-depth).
+   * Set to false to skip the status check and rely solely on Paperclip control
+   * frames (e.g. terminate_session) for pause enforcement.
+   */
+  statusCheckBeforeDispatch?: boolean;
+};
+
 export type GatewayConfig = {
   /** Single multiplexed port for Gateway WS + HTTP (default: 18789). */
   port?: number;
@@ -439,4 +449,6 @@ export type GatewayConfig = {
    * the rolling window expires. Default: 10.
    */
   channelMaxRestartsPerHour?: number;
+  /** Paperclip adapter integration settings (Protocol v2). */
+  adapter?: GatewayAdapterConfig;
 };

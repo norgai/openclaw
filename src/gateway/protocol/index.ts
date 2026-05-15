@@ -133,6 +133,8 @@ import {
   ErrorCodes,
   type ErrorShape,
   ErrorShapeSchema,
+  type BundleInvalidatedControlFrame,
+  BundleInvalidatedControlFrameSchema,
   type EventFrame,
   EventFrameSchema,
   errorShape,
@@ -295,6 +297,9 @@ const ajv = new (AjvPkg as unknown as new (opts?: object) => import("ajv").defau
   removeAdditional: false,
 });
 
+export const validateBundleInvalidatedControlFrame = ajv.compile<BundleInvalidatedControlFrame>(
+  BundleInvalidatedControlFrameSchema,
+);
 export const validateConnectParams = ajv.compile<ConnectParams>(ConnectParamsSchema);
 export const validateRequestFrame = ajv.compile<RequestFrame>(RequestFrameSchema);
 export const validateResponseFrame = ajv.compile<ResponseFrame>(ResponseFrameSchema);
@@ -662,6 +667,7 @@ export {
 };
 
 export type {
+  BundleInvalidatedControlFrame,
   GatewayFrame,
   ConnectParams,
   HelloOk,

@@ -43,6 +43,7 @@ import {
   isGatewayMessageChannel,
   normalizeMessageChannel,
 } from "../../utils/message-channel.js";
+import { checkAgentStatusBeforeDispatch } from "../agent-status-check.js";
 import { resolveAssistantIdentity } from "../assistant-identity.js";
 import { checkAndReloadBundleRevision } from "../bundle-revision.js";
 import { MediaOffloadError, parseMessageWithAttachments } from "../chat-attachments.js";
@@ -196,9 +197,17 @@ function dispatchAgentRunFromGateway(params: {
   ingressOpts: Parameters<typeof agentCommandFromIngress>[0];
   runId: string;
   idempotencyKey: string;
+  /** connId of the WebSocket connection that triggered this dispatch. Used for
+   *  bundle_invalidated queueing: the dispatch count is tracked so that reloads
+   *  received mid-job are deferred until the job completes. */
+  connId: string | null;
   respond: GatewayRequestHandlerOptions["respond"];
   context: GatewayRequestHandlerOptions["context"];
 }) {
+  const { connId } = params;
+  if (connId) {
+    params.context.markDispatchStarted(connId);
+  }
   const inputProvenance = normalizeInputProvenance(params.ingressOpts.inputProvenance);
   const shouldTrackTask =
     params.ingressOpts.sessionKey?.trim() && inputProvenance?.kind !== "inter_session";
@@ -227,6 +236,9 @@ function dispatchAgentRunFromGateway(params: {
   }
   void agentCommandFromIngress(params.ingressOpts, defaultRuntime, params.context.deps)
     .then((result) => {
+      if (connId) {
+        params.context.markDispatchEnded(connId);
+      }
       const payload = {
         runId: params.runId,
         status: "ok" as const,
@@ -247,6 +259,9 @@ function dispatchAgentRunFromGateway(params: {
       params.respond(true, payload, undefined, { runId: params.runId });
     })
     .catch((err) => {
+      if (connId) {
+        params.context.markDispatchEnded(connId);
+      }
       const error = errorShape(ErrorCodes.UNAVAILABLE, String(err));
       const payload = {
         runId: params.runId,
@@ -840,6 +855,50 @@ export const agentHandlers: GatewayRequestHandlers = {
       }
     }
 
+    const dispatchConnId = typeof client?.connId === "string" ? client.connId : null;
+
+    // Status poll (Protocol v2 defence-in-depth): verify agent is not paused
+    // before each dispatch. Fail-open on network errors so availability is
+    // preserved; only a confirmed "paused" status aborts the dispatch.
+    // Honour the gateway.adapter.statusCheckBeforeDispatch config (default true).
+    const dispatchAgentId =
+      agentId ??
+      (resolvedSessionKey
+        ? (() => {
+            try {
+              return resolveAgentIdFromSessionKey(resolvedSessionKey);
+            } catch {
+              return undefined;
+            }
+          })()
+        : undefined);
+    const statusCheckEnabled = cfg.gateway?.adapter?.statusCheckBeforeDispatch !== false;
+    if (statusCheckEnabled && dispatchAgentId) {
+      const statusResult = await checkAgentStatusBeforeDispatch(dispatchAgentId);
+      if (statusResult.status === "paused") {
+        context.logGateway.warn(
+          `agent ${dispatchAgentId} is paused — rejecting dispatch runId=${runId}`,
+        );
+        respond(
+          false,
+          undefined,
+          errorShape(ErrorCodes.UNAVAILABLE, "agent is paused", {
+            details: { reason: "agent_paused", agentId: dispatchAgentId },
+          }),
+        );
+        if (dispatchConnId) {
+          context.closeClient(dispatchConnId, 1008, "agent paused");
+        }
+        return;
+      }
+      if (statusResult.status === "unavailable") {
+        // Fail-open: log and proceed.
+        context.logGateway.warn(
+          `agent status check unavailable for ${dispatchAgentId}: ${statusResult.reason} — proceeding`,
+        );
+      }
+    }
+
     dispatchAgentRunFromGateway({
       ingressOpts: {
         message,
@@ -888,6 +947,7 @@ export const agentHandlers: GatewayRequestHandlers = {
       },
       runId,
       idempotencyKey: idem,
+      connId: dispatchConnId,
       respond,
       context,
     });

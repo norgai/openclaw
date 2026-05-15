@@ -1337,6 +1337,12 @@ export async function startGatewayServer(
 
     const canvasHostServerPort = (canvasHostServer as CanvasHostServer | null)?.port;
 
+    // Tracks the number of active job dispatches per connection (connId → count).
+    // Used to queue bundle_invalidated reloads until the connection is idle.
+    const dispatchActiveCounts = new Map<string, number>();
+    // Queued bundle-invalidation callbacks waiting for all dispatches to drain.
+    const dispatchIdleCallbacks = new Map<string, Array<() => void>>();
+
     const gatewayRequestContext: import("./server-methods/types.js").GatewayRequestContext = {
       deps,
       cron,
@@ -1439,6 +1445,56 @@ export async function startGatewayServer(
           if (c.connId === connId) {
             try {
               c.socket.send(payload);
+            } catch {
+              /* ignore */
+            }
+            break;
+          }
+        }
+      },
+      markDispatchStarted: (connId: string) => {
+        dispatchActiveCounts.set(connId, (dispatchActiveCounts.get(connId) ?? 0) + 1);
+      },
+      markDispatchEnded: (connId: string) => {
+        const prev = dispatchActiveCounts.get(connId) ?? 0;
+        const next = Math.max(0, prev - 1);
+        if (next === 0) {
+          dispatchActiveCounts.delete(connId);
+          const callbacks = dispatchIdleCallbacks.get(connId);
+          if (callbacks) {
+            dispatchIdleCallbacks.delete(connId);
+            for (const cb of callbacks) {
+              try {
+                cb();
+              } catch {
+                /* best-effort */
+              }
+            }
+          }
+        } else {
+          dispatchActiveCounts.set(connId, next);
+        }
+      },
+      onDispatchIdle: (connId: string, callback: () => void) => {
+        if ((dispatchActiveCounts.get(connId) ?? 0) === 0) {
+          // Already idle — call inline (non-blocking; caller must not rely on
+          // it being async).
+          try {
+            callback();
+          } catch {
+            /* best-effort */
+          }
+        } else {
+          const existing = dispatchIdleCallbacks.get(connId) ?? [];
+          existing.push(callback);
+          dispatchIdleCallbacks.set(connId, existing);
+        }
+      },
+      closeClient: (connId: string, code?: number, reason?: string) => {
+        for (const c of clients) {
+          if (c.connId === connId) {
+            try {
+              c.socket.close(code, reason);
             } catch {
               /* ignore */
             }

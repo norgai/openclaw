@@ -110,6 +110,29 @@ export type GatewayRequestContext = {
    * Used for out-of-band signals that are not broadcast events (e.g. bundle_unavailable).
    */
   sendAgentControl: (connId: string, frame: Record<string, unknown>) => void;
+  /**
+   * Signal that a job dispatch has started for the given connection.
+   * Used to track active runs so that `bundle_invalidated` can queue reloads
+   * instead of swapping the bundle mid-job.
+   */
+  markDispatchStarted: (connId: string) => void;
+  /**
+   * Signal that a job dispatch has completed (success or error) for the
+   * given connection. When the active count drops to zero, any queued
+   * `bundle_invalidated` reload callbacks are fired.
+   */
+  markDispatchEnded: (connId: string) => void;
+  /**
+   * Register a callback to run when the connection has no more active
+   * dispatches. If there are no active dispatches right now, the callback is
+   * called synchronously before this function returns.
+   */
+  onDispatchIdle: (connId: string, callback: () => void) => void;
+  /**
+   * Close the WebSocket connection for the given connId.
+   * Used to forcibly close the socket after a pause-detected job rejection.
+   */
+  closeClient: (connId: string, code?: number, reason?: string) => void;
 };
 
 export type GatewayRequestOptions = {

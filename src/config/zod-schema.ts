@@ -874,6 +874,12 @@ export const OpenClawSchema = z
           })
           .strict()
           .optional(),
+        adapter: z
+          .object({
+            statusCheckBeforeDispatch: z.boolean().optional(),
+          })
+          .strict()
+          .optional(),
       })
       .strict()
       .superRefine((gateway, ctx) => {
