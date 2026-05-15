@@ -105,6 +105,11 @@ export type GatewayRequestContext = {
     prompter: import("../../wizard/prompts.js").WizardPrompter,
   ) => Promise<void>;
   broadcastVoiceWakeChanged: (triggers: string[]) => void;
+  /**
+   * Send an `agent_control` frame directly to a specific connected client.
+   * Used for out-of-band signals that are not broadcast events (e.g. bundle_unavailable).
+   */
+  sendAgentControl: (connId: string, frame: Record<string, unknown>) => void;
 };
 
 export type GatewayRequestOptions = {

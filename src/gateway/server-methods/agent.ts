@@ -44,6 +44,7 @@ import {
   normalizeMessageChannel,
 } from "../../utils/message-channel.js";
 import { resolveAssistantIdentity } from "../assistant-identity.js";
+import { checkAndReloadBundleRevision } from "../bundle-revision.js";
 import { MediaOffloadError, parseMessageWithAttachments } from "../chat-attachments.js";
 import { resolveAssistantAvatarUrl } from "../control-ui-shared.js";
 import { ADMIN_SCOPE } from "../method-scopes.js";
@@ -318,6 +319,7 @@ export const agentHandlers: GatewayRequestHandlers = {
       bestEffortDeliver?: boolean;
       label?: string;
       inputProvenance?: InputProvenance;
+      bundleRevisionId?: string | null;
     };
     const senderIsOwner = resolveSenderIsOwnerFromClient(client);
     const allowModelOverride = resolveAllowModelOverrideFromClient(client);
@@ -796,6 +798,47 @@ export const agentHandlers: GatewayRequestHandlers = {
     }
 
     const resolvedThreadId = explicitThreadId ?? deliveryPlan.resolvedThreadId;
+
+    // Bundle revision check (Protocol v2): reload agent instructions when the
+    // bundleRevisionId from the Paperclip adapter differs from the cached value.
+    // Skip when bundleRevisionId is absent (older adapters / non-Paperclip callers).
+    const incomingBundleRevisionId = request.bundleRevisionId;
+    if (incomingBundleRevisionId && resolvedSessionKey) {
+      const effectiveAgentId =
+        agentId ??
+        (resolvedSessionKey
+          ? (() => {
+              try {
+                return resolveAgentIdFromSessionKey(resolvedSessionKey);
+              } catch {
+                return undefined;
+              }
+            })()
+          : undefined);
+      if (effectiveAgentId) {
+        const bundleCheck = await checkAndReloadBundleRevision({
+          sessionKey: resolvedSessionKey,
+          agentId: effectiveAgentId,
+          bundleRevisionId: incomingBundleRevisionId,
+        });
+        if (bundleCheck.status === "unavailable") {
+          const connId = typeof client?.connId === "string" ? client.connId : null;
+          if (connId) {
+            context.sendAgentControl(connId, {
+              action: "bundle_unavailable",
+              agentId: effectiveAgentId,
+              sessionKey: resolvedSessionKey,
+              runId,
+              error: bundleCheck.error,
+            });
+          }
+          context.logGateway.warn(
+            `bundle reload failed for agent ${effectiveAgentId}: ${bundleCheck.error}`,
+          );
+          return;
+        }
+      }
+    }
 
     dispatchAgentRunFromGateway({
       ingressOpts: {

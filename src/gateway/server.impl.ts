@@ -1433,6 +1433,19 @@ export async function startGatewayServer(
       markChannelLoggedOut,
       wizardRunner,
       broadcastVoiceWakeChanged,
+      sendAgentControl: (connId: string, frame: Record<string, unknown>) => {
+        const payload = JSON.stringify({ type: "agent_control", ...frame });
+        for (const c of clients) {
+          if (c.connId === connId) {
+            try {
+              c.socket.send(payload);
+            } catch {
+              /* ignore */
+            }
+            break;
+          }
+        }
+      },
     };
 
     // Register a lazy fallback for plugin subagent dispatch in non-WS paths
