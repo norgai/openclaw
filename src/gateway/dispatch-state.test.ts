@@ -64,6 +64,47 @@ describe("createDispatchStateManager", () => {
       manager.onDispatchIdle(connId, cb);
       expect(cb).toHaveBeenCalledTimes(1);
     });
+
+    it("drains queued idle callbacks in FIFO insertion order", () => {
+      const connId = "conn-fifo";
+      const order: number[] = [];
+      const cb1 = vi.fn(() => order.push(1));
+      const cb2 = vi.fn(() => order.push(2));
+      const cb3 = vi.fn(() => order.push(3));
+
+      manager.markDispatchStarted(connId);
+      manager.onDispatchIdle(connId, cb1);
+      manager.onDispatchIdle(connId, cb2);
+      manager.onDispatchIdle(connId, cb3);
+      expect(order).toEqual([]);
+
+      manager.markDispatchEnded(connId);
+
+      expect(cb1).toHaveBeenCalledTimes(1);
+      expect(cb2).toHaveBeenCalledTimes(1);
+      expect(cb3).toHaveBeenCalledTimes(1);
+      expect(order).toEqual([1, 2, 3]);
+    });
+
+    it("continues draining queued callbacks even when one throws", () => {
+      const connId = "conn-fifo-throws";
+      const order: string[] = [];
+      const cbOk1 = vi.fn(() => order.push("ok1"));
+      const cbThrow = vi.fn(() => {
+        order.push("throw");
+        throw new Error("boom");
+      });
+      const cbOk2 = vi.fn(() => order.push("ok2"));
+
+      manager.markDispatchStarted(connId);
+      manager.onDispatchIdle(connId, cbOk1);
+      manager.onDispatchIdle(connId, cbThrow);
+      manager.onDispatchIdle(connId, cbOk2);
+
+      expect(() => manager.markDispatchEnded(connId)).not.toThrow();
+      expect(order).toEqual(["ok1", "throw", "ok2"]);
+      expect(cbOk2).toHaveBeenCalledTimes(1);
+    });
   });
 
   describe("cleanupConnId — AC1, AC2, AC3", () => {
