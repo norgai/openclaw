@@ -86,6 +86,7 @@ import { resolveGatewayAuth } from "./auth.js";
 import { startChannelHealthMonitor } from "./channel-health-monitor.js";
 import { resolveGatewayReloadSettings, startGatewayConfigReloader } from "./config-reload.js";
 import type { ControlUiRootState } from "./control-ui.js";
+import { createDispatchStateManager } from "./dispatch-state.js";
 import {
   GATEWAY_EVENT_UPDATE_AVAILABLE,
   type GatewayUpdateAvailableEventPayload,
@@ -1337,11 +1338,7 @@ export async function startGatewayServer(
 
     const canvasHostServerPort = (canvasHostServer as CanvasHostServer | null)?.port;
 
-    // Tracks the number of active job dispatches per connection (connId → count).
-    // Used to queue bundle_invalidated reloads until the connection is idle.
-    const dispatchActiveCounts = new Map<string, number>();
-    // Queued bundle-invalidation callbacks waiting for all dispatches to drain.
-    const dispatchIdleCallbacks = new Map<string, Array<() => void>>();
+    const dispatchState = createDispatchStateManager();
 
     const gatewayRequestContext: import("./server-methods/types.js").GatewayRequestContext = {
       deps,
@@ -1452,44 +1449,10 @@ export async function startGatewayServer(
           }
         }
       },
-      markDispatchStarted: (connId: string) => {
-        dispatchActiveCounts.set(connId, (dispatchActiveCounts.get(connId) ?? 0) + 1);
-      },
-      markDispatchEnded: (connId: string) => {
-        const prev = dispatchActiveCounts.get(connId) ?? 0;
-        const next = Math.max(0, prev - 1);
-        if (next === 0) {
-          dispatchActiveCounts.delete(connId);
-          const callbacks = dispatchIdleCallbacks.get(connId);
-          if (callbacks) {
-            dispatchIdleCallbacks.delete(connId);
-            for (const cb of callbacks) {
-              try {
-                cb();
-              } catch {
-                /* best-effort */
-              }
-            }
-          }
-        } else {
-          dispatchActiveCounts.set(connId, next);
-        }
-      },
-      onDispatchIdle: (connId: string, callback: () => void) => {
-        if ((dispatchActiveCounts.get(connId) ?? 0) === 0) {
-          // Already idle — call inline (non-blocking; caller must not rely on
-          // it being async).
-          try {
-            callback();
-          } catch {
-            /* best-effort */
-          }
-        } else {
-          const existing = dispatchIdleCallbacks.get(connId) ?? [];
-          existing.push(callback);
-          dispatchIdleCallbacks.set(connId, existing);
-        }
-      },
+      markDispatchStarted: dispatchState.markDispatchStarted,
+      markDispatchEnded: dispatchState.markDispatchEnded,
+      onDispatchIdle: dispatchState.onDispatchIdle,
+      cleanupDispatchState: dispatchState.cleanupConnId,
       closeClient: (connId: string, code?: number, reason?: string) => {
         for (const c of clients) {
           if (c.connId === connId) {
