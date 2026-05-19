@@ -129,6 +129,12 @@ export type GatewayRequestContext = {
    */
   onDispatchIdle: (connId: string, callback: () => void) => void;
   /**
+   * Drop all dispatch state for a closed connection. Any queued idle callbacks
+   * are discarded (not invoked) — the connection is gone and the reload would
+   * target nothing. Must be called from the WS close handler.
+   */
+  cleanupDispatchState: (connId: string) => void;
+  /**
    * Close the WebSocket connection for the given connId.
    * Used to forcibly close the socket after a pause-detected job rejection.
    */
