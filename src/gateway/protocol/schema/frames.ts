@@ -168,6 +168,33 @@ export const EventFrameSchema = Type.Object(
   { additionalProperties: false },
 );
 
+/**
+ * Incoming `agent_control` frame sent by the Paperclip adapter to signal that
+ * the agent's instruction bundle has been updated (Protocol v2, NOR-4841).
+ *
+ * Shape (all required):
+ *   { type: "agent_control", action: "bundle_invalidated",
+ *     agentId: string, bundleRevisionId: string, ts: integer }
+ */
+export const BundleInvalidatedControlFrameSchema = Type.Object(
+  {
+    type: Type.Literal("agent_control"),
+    action: Type.Literal("bundle_invalidated"),
+    agentId: NonEmptyString,
+    bundleRevisionId: NonEmptyString,
+    ts: Type.Integer({ minimum: 0 }),
+  },
+  { additionalProperties: false },
+);
+
+export type BundleInvalidatedControlFrame = {
+  type: "agent_control";
+  action: "bundle_invalidated";
+  agentId: string;
+  bundleRevisionId: string;
+  ts: number;
+};
+
 // Discriminated union of all top-level frames. Using a discriminator makes
 // downstream codegen (quicktype) produce tighter types instead of all-optional
 // blobs.

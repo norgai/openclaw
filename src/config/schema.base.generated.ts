@@ -21435,6 +21435,15 @@ export const GENERATED_BASE_CONFIG_SCHEMA: BaseConfigSchemaResponse = {
             },
             additionalProperties: false,
           },
+          adapter: {
+            type: "object",
+            properties: {
+              statusCheckBeforeDispatch: {
+                type: "boolean",
+              },
+            },
+            additionalProperties: false,
+          },
         },
         additionalProperties: false,
         title: "Gateway",

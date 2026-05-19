@@ -51,6 +51,7 @@ import { resolveRuntimeServiceVersion } from "../../../version.js";
 import type { AuthRateLimiter } from "../../auth-rate-limit.js";
 import type { GatewayAuthResult, ResolvedGatewayAuth } from "../../auth.js";
 import { isLocalDirectRequest } from "../../auth.js";
+import { checkAndReloadBundleRevision } from "../../bundle-revision.js";
 import {
   buildCanvasScopedHostUrl,
   CANVAS_CAPABILITY_TTL_MS,
@@ -78,6 +79,7 @@ import {
   errorShape,
   formatValidationErrors,
   PROTOCOL_VERSION,
+  validateBundleInvalidatedControlFrame,
   validateConnectParams,
   validateRequestFrame,
 } from "../../protocol/index.js";
@@ -1359,6 +1361,54 @@ export function attachGatewayWsMessageHandler(params: {
           close(4001, "gateway auth changed");
           return;
         }
+      }
+
+      // Protocol v2: handle incoming agent_control frames from the Paperclip
+      // adapter. These are one-way push notifications — no response frame needed.
+      if (frameType === "agent_control") {
+        if (!validateBundleInvalidatedControlFrame(parsed)) {
+          logGateway.warn(
+            `invalid agent_control frame conn=${connId}: ${formatValidationErrors(validateBundleInvalidatedControlFrame.errors)}`,
+          );
+          return;
+        }
+        const frame = parsed;
+        if (frame.action === "bundle_invalidated") {
+          logWs("in", "agent_control", {
+            connId,
+            action: frame.action,
+            agentId: frame.agentId,
+            bundleRevisionId: frame.bundleRevisionId,
+          });
+          const { agentId: frameAgentId, bundleRevisionId: frameRevisionId } = frame;
+          // We derive sessionKey from the agentId so the bundle cache is keyed
+          // consistently with the per-dispatch reload path.
+          const sessionKeyForInvalidation = `agent:${frameAgentId}`;
+          const context = buildRequestContext();
+          const doReload = () => {
+            void checkAndReloadBundleRevision({
+              sessionKey: sessionKeyForInvalidation,
+              agentId: frameAgentId,
+              bundleRevisionId: frameRevisionId,
+            }).then((result) => {
+              if (result.status === "refreshed") {
+                logGateway.info(
+                  `bundle_invalidated: refreshed agent=${frameAgentId} rev=${result.bundleRevisionId}`,
+                );
+              } else if (result.status === "unavailable") {
+                logGateway.warn(
+                  `bundle_invalidated: reload failed agent=${frameAgentId}: ${result.error}`,
+                );
+              }
+              // "match" and "skip" are no-ops.
+            });
+          };
+          // Idle path: no active dispatch → reload immediately in background.
+          // Active path: dispatch running → queue reload until connection is idle,
+          // preserving the bundle version the running job started with (AC3/AC4).
+          context.onDispatchIdle(connId, doReload);
+        }
+        return;
       }
 
       // After handshake, accept only req frames
