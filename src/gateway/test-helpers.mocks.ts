@@ -218,6 +218,16 @@ vi.mock("/src/agents/pi-embedded-runner/runs.js", async () => {
   );
 });
 
+// NOR-4842: Stub the pre-dispatch agent status check so integration tests do
+// not make live HTTP calls to PAPERCLIP_API_URL. Without this stub, every
+// `job_dispatch` makes a real fetch to `/api/agents/{id}` which (in CI/dev
+// environments where the URL points at a real Paperclip but the test agent
+// ID does not exist) returns 404 after ~1.4s, desynchronising the
+// `agentCommand` spy from the `rpcReq` await window.
+vi.mock("./agent-status-check.js", () => ({
+  checkAgentStatusBeforeDispatch: vi.fn().mockResolvedValue({ status: "active" }),
+}));
+
 vi.mock("../commands/health.js", () => ({
   getHealthSnapshot: vi.fn().mockResolvedValue({ ok: true, stub: true }),
 }));
